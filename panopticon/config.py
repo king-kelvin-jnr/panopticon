@@ -1,3 +1,4 @@
+
 """Secure environment configuration for PANOPTICON."""
 
 from __future__ import annotations
@@ -19,9 +20,36 @@ PRODUCTION_QLOO_URL = (
 )
 
 
+def _setting(name: str, default: str = "") -> str:
+    """Read a setting from the environment or Streamlit secrets.
+
+    Environment variables take priority, so existing local .env
+    configuration continues to work. Streamlit secrets provide the
+    fallback for cloud deployments.
+    """
+    environment_value = os.getenv(name)
+
+    if environment_value and environment_value.strip():
+        return environment_value.strip()
+
+    try:
+        import streamlit as st
+
+        secret_value = st.secrets.get(name, default)
+
+        if secret_value is None:
+            return default
+
+        return str(secret_value).strip()
+
+    except Exception:
+        # Streamlit secrets may not be configured in a local environment.
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
-    """Application settings loaded from environment variables."""
+    """Application settings."""
 
     qloo_api_key: str | None
     qloo_api_url: str
@@ -34,13 +62,11 @@ class Settings:
 def _configured_qloo_url() -> str:
     """Validate and select the appropriate Qloo API endpoint."""
 
-    environment = os.getenv(
+    environment = _setting(
         "QLOO_API_ENVIRONMENT", "hackathon"
-    ).strip().lower()
+    ).lower()
 
-    configured_url = os.getenv(
-        "QLOO_API_URL", ""
-    ).strip()
+    configured_url = _setting("QLOO_API_URL")
 
     if environment not in {"hackathon", "production"}:
         raise ValueError(
@@ -62,12 +88,6 @@ def _configured_qloo_url() -> str:
             "QLOO_API_URL must be a valid HTTPS URL."
         )
 
-    expected_host = (
-        "hackathon.api.qloo.com"
-        if environment == "hackathon"
-        else "api.qloo.com"
-    )
-
     if parts.hostname not in {
         "api.qloo.com",
         "hackathon.api.qloo.com",
@@ -75,6 +95,12 @@ def _configured_qloo_url() -> str:
         raise ValueError(
             "QLOO_API_URL must use an official Qloo API host."
         )
+
+    expected_host = (
+        "hackathon.api.qloo.com"
+        if environment == "hackathon"
+        else "api.qloo.com"
+    )
 
     path = parts.path or "/v2/insights"
 
@@ -92,7 +118,7 @@ def _configured_qloo_url() -> str:
 def get_settings() -> Settings:
     """Load and validate application settings."""
 
-    raw_timeout = os.getenv(
+    raw_timeout = _setting(
         "PANOPTICON_REQUEST_TIMEOUT", "20"
     )
 
@@ -110,20 +136,15 @@ def get_settings() -> Settings:
         )
 
     return Settings(
-        qloo_api_key=(
-            os.getenv("QLOO_API_KEY", "").strip() or None
-        ),
+        qloo_api_key=_setting("QLOO_API_KEY") or None,
         qloo_api_url=_configured_qloo_url(),
-        groq_api_key=(
-            os.getenv("GROQ_API_KEY", "").strip() or None
+        groq_api_key=_setting("GROQ_API_KEY") or None,
+        groq_model=_setting(
+            "GROQ_MODEL", "openai/gpt-oss-120b"
         ),
-        groq_model=os.getenv(
-            "GROQ_MODEL",
-            "openai/gpt-oss-120b",
-        ).strip(),
-        groq_api_url=os.getenv(
+        groq_api_url=_setting(
             "GROQ_API_URL",
             "https://api.groq.com/openai/v1/chat/completions",
-        ).strip(),
+        ),
         request_timeout=timeout,
     )
